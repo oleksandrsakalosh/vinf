@@ -185,3 +185,6 @@ Include/
 Lib/
 Scripts/
 pyvenv.cfg
+
+# Fetched pages
+data/

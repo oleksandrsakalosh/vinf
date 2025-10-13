@@ -1,13 +1,28 @@
+from pathlib import Path
+import hashlib
 import os, time, random, re
 import requests
 import urllib.robotparser as urob
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
+from collections import deque
+
+from logger import CrawlerLogger
 
 BASE_URL = "https://epguides.com/"
 UA = "UniSeriesCrawler/1.0 (+mailto:oleksandr.sakalosh0@gmail.com)"
 BASE_DELAY = 2.0 
 TIMEOUT = 20
-SAVE_DIR = "data"
+
+logger = CrawlerLogger()
+SAVE_DIR = "data" # .gitignore this directory
+
+HREF_RE = re.compile(
+    r'href=["\'](.*?)["\']', re.IGNORECASE
+)
+
+SKIP_SCHEMES = ('mailto:', 'javascript:', 'tel:', 'data:')
+
+mode = "prod" # "prod" or "dev"
 
 def load_robots(base_url):
     rp = urob.RobotFileParser()
@@ -17,7 +32,7 @@ def load_robots(base_url):
         rp.read()
         return rp
     except Exception as e:
-        print(f"Error loading robots.txt from {robots_url}: {e}")
+        logger.log_error(robots_url, e)
         return None
 
 class MyCrawler():
@@ -29,9 +44,9 @@ class MyCrawler():
         self.base_url = base_url
         self.rp = load_robots(base_url)
         if not self.rp:
-            print("Warning: couldn't load robots.txt")
+            logger.log_error(base_url, "Failed to load robots.txt")
         self.visited = set()
-        self.to_visit = set([base_url])
+        self.to_visit = deque([base_url])
 
     def allowed(self, url):
         if not self.rp:
@@ -43,8 +58,6 @@ class MyCrawler():
         time.sleep(delay)
 
     def fetch(self, url):
-        if not self.allowed(url):
-            raise ValueError(f"Fetching disallowed by robots.txt: {url}")
         self.sleep_politely()
 
         headers = {
@@ -54,37 +67,125 @@ class MyCrawler():
         try:
             response = requests.get(url, headers=headers, timeout=TIMEOUT)
             response.raise_for_status()
-            return response.text
-
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'text/html' in content_type:
+                return response.text
+            else:
+                logger.log_skip(url, f"Unsupported Content-Type: {content_type}")
+                return None
         except requests.HTTPError as e:
-            print(f"HTTP error fetching {url}: {e}")
+            logger.log_error(url, e, retry_count=0)
             return None
         except requests.RequestException as e:
-            print(f"Error fetching {url}: {e}")
+            logger.log_error(url, e, retry_count=0)
             return None
         
+    def normalize_url(self, link):
+        return urljoin(self.base_url, link)
+
     def extract_links(self, html):
-        return re.findall(r'href=["\'](.*?)["\']', html, re.IGNORECASE)
-        
-    def save_html(self, content, filename):
-        os.makedirs(SAVE_DIR, exist_ok=True)
-        filepath = os.path.join(SAVE_DIR, filename)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
+        links = []
+        for match in HREF_RE.finditer(html):
+            link = match.group(1)
+            if link.startswith(SKIP_SCHEMES):
+                continue
+            links.append(link)
+        return links
+
+    def save_html(self, content, url):
+        parts = urlsplit(url)
+        path = parts.path
+        if path.endswith("/") or not path:
+            path = path + "index.html"
+        if parts.query:
+            h = hashlib.sha1(parts.query.encode("utf-8")).hexdigest()[:10]
+            root, ext = os.path.splitext(path)
+            path = f"{root}__q_{h}{ext or '.html'}"
+        fp = Path(SAVE_DIR) / path.lstrip("/")
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content, encoding="utf-8")
 
     def run(self):
-        while self.to_visit:
-            url = self.to_visit.pop()
-            if url in self.visited:
-                continue
-            print(f"Fetching: {url}")
-            html = self.fetch(url)
-            if html:
-                filename = re.sub(r'[^a-zA-Z0-9]', '_', url.replace(self.base_url, '')) + ".html"
-                self.save_html(html, filename)
-                links = self.extract_links(html)
-                for link in links:
-                    full_url = urljoin(self.base_url, link)
-                    if full_url not in self.visited:
-                        self.to_visit.add(full_url)
-            self.visited.add(url)
+        if mode == "prod":
+            while self.to_visit:
+                start = time.time()
+                url = self.to_visit.popleft()
+                logger.log_info(f"Fetching: {url}")
+                if url in self.visited:
+                    logger.log_skip(url, "Already visited")
+                    continue
+
+                html = self.fetch(url)
+                if html:
+                    self.save_html(html, url)
+                    links = self.extract_links(html)
+                    count = 0
+                    for link in links:
+                        new_url = self.normalize_url(link)
+                        if not new_url: 
+                            logger.log_skip(link, "Failed to normalize URL")
+                            continue
+                        if not new_url.startswith(self.base_url):
+                            logger.log_skip(new_url, "Cross-origin link")
+                            continue
+                        if not self.allowed(new_url):
+                            logger.log_skip(new_url, "Disallowed by robots.txt")
+                            continue
+                        if new_url in self.visited:
+                            logger.log_skip(new_url, "Already visited")
+                            continue
+
+                        self.to_visit.append(new_url)
+                        count += 1
+                    response_time = time.time() - start
+                    logger.log_page_crawled(url, count, response_time=response_time)
+                else:
+                    logger.log_skip(url, "No HTML content")
+                self.visited.add(url)
+        elif mode == "dev":
+            max_depth = 2
+            current_depth = 0
+
+            while self.to_visit and current_depth < max_depth:
+                logger.log_info(f"Current depth: {current_depth}")
+                logger.log_info(f"URLs to visit: {len(self.to_visit)}")
+                start = time.time()
+                next_level = deque()
+                for url in list(self.to_visit):
+                    logger.log_info(f"Fetching: {url}")
+                    if url in self.visited:
+                        logger.log_skip(url, "Already visited")
+                        continue
+
+                    html = self.fetch(url)
+                    if html:
+                        self.save_html(html, url)
+                        links = self.extract_links(html)
+                        count = 0
+                        for link in links:
+                            new_url = self.normalize_url(link)
+                            if not new_url: 
+                                logger.log_skip(link, "Failed to normalize URL")
+                                continue
+                            if not new_url.startswith(self.base_url):
+                                logger.log_skip(new_url, "Cross-origin link")
+                                continue
+                            if not self.allowed(new_url):
+                                logger.log_skip(new_url, "Disallowed by robots.txt")
+                                continue
+                            if new_url in self.visited:
+                                logger.log_skip(new_url, "Already visited")
+                                continue
+                            next_level.append(new_url)
+                            count += 1
+                        response_time = time.time() - start
+                        logger.log_page_crawled(url, count, response_time=response_time)
+                    else:
+                        logger.log_skip(url, "No HTML content")
+                    self.visited.add(url)
+                self.to_visit = next_level
+                current_depth += 1
+
+if __name__ == "__main__":
+    crawler = MyCrawler()
+    crawler.run()
