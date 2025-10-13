@@ -1,6 +1,6 @@
 from pathlib import Path
 import hashlib
-import os, time, random, re
+import os, time, random, re, csv
 import requests
 import urllib.robotparser as urob
 from urllib.parse import urljoin, urlsplit
@@ -104,6 +104,14 @@ class MyCrawler():
         fp = Path(SAVE_DIR) / path.lstrip("/")
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content, encoding="utf-8")
+
+        mapping_fp = Path(SAVE_DIR) / "url_mapping.tsv"
+        write_header = not mapping_fp.exists()
+        with mapping_fp.open("a", encoding="utf-8", newline='') as f:
+            writer = csv.writer(f, delimiter="\t")
+            if write_header:
+                writer.writerow(["url", "path"])
+            writer.writerow([url, str(fp)])
 
     def run(self):
         if mode == "prod":

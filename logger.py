@@ -20,6 +20,9 @@ class CrawlerLogger:
             'errors': 0,
             'start_time': datetime.now()
         }
+
+        with open(log_file, 'w'):
+            pass
     
     def log_page_crawled(self, url, links_found, response_time):
         self.stats['pages_crawled'] += 1
