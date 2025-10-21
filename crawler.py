@@ -22,7 +22,10 @@ HREF_RE = re.compile(
 
 SKIP_SCHEMES = ('mailto:', 'javascript:', 'tel:', 'data:')
 
-mode = "prod" # "prod" or "dev"
+mode = "controlled" # "prod" | "dev" | "controlled"
+LINKS = [
+    "https://epguides.com/Simpsons/",
+]
 
 def load_robots(base_url):
     rp = urob.RobotFileParser()
@@ -187,12 +190,28 @@ class MyCrawler():
                             next_level.append(new_url)
                             count += 1
                         response_time = time.time() - start
-                        logger.log_page_crawled(url, count, response_time=response_time)
+                        logger.log_page_crawled(url, count, response_time)
                     else:
                         logger.log_skip(url, "No HTML content")
                     self.visited.add(url)
                 self.to_visit = next_level
                 current_depth += 1
+        elif mode == "controlled":
+            for url in LINKS:
+                start = time.time()
+                logger.log_info(f"Fetching: {url}")
+                if url in self.visited:
+                    logger.log_skip(url, "Already visited")
+                    continue
+
+                html = self.fetch(url)
+                if html:
+                    self.save_html(html, url)
+                    response_time = time.time() - start
+                    logger.log_page_crawled(url, 0, response_time)
+                else:
+                    logger.log_skip(url, "No HTML content")
+                self.visited.add(url)
 
 if __name__ == "__main__":
     crawler = MyCrawler()
