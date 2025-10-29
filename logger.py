@@ -2,12 +2,14 @@ import logging
 import json
 from datetime import datetime
 
+LOGS_DIR = "logs"
+
 class CrawlerLogger:
     def __init__(self, log_file='crawler.log'):
         self.logger = logging.getLogger('CrawlerLogger')
         self.logger.setLevel(logging.INFO)
         
-        handler = logging.FileHandler(log_file)
+        handler = logging.FileHandler(f"{LOGS_DIR}/{log_file}")
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
@@ -21,7 +23,7 @@ class CrawlerLogger:
             'start_time': datetime.now()
         }
 
-        with open(log_file, 'w'):
+        with open(f"{LOGS_DIR}/{log_file}", 'w'):
             pass
     
     def log_page_crawled(self, url, links_found, response_time):
@@ -70,3 +72,39 @@ class CrawlerLogger:
             - Runtime: {elapsed}
             - Crawl rate: {rate:.2f} pages/second
         """)
+
+class ExtractorLogger:
+    def __init__(self, log_file='extractor.log'):
+        self.logger = logging.getLogger('ExtractorLogger')
+        self.logger.setLevel(logging.INFO)
+
+        handler = logging.FileHandler(f"{LOGS_DIR}/{log_file}")
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        
+        with open(f"{LOGS_DIR}/{log_file}", 'w'):
+            pass
+    
+    def log_extraction(self, url, status, details=None):
+        self.logger.info(json.dumps({
+            'event': 'extraction',
+            'url': url,
+            'status': status,
+            'details': details
+        }))
+
+    def log_warning(self, message):
+        self.logger.warning(json.dumps({
+            'event': 'warning',
+            'message': message
+        }))
+    
+    def log_error(self, url, error):
+        self.logger.error(json.dumps({
+            'event': 'extraction_error',
+            'url': url,
+            'error': str(error)
+        }))

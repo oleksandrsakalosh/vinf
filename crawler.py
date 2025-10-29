@@ -15,6 +15,7 @@ TIMEOUT = 20
 
 logger = CrawlerLogger()
 SAVE_DIR = "data" # .gitignore this directory
+LOGS_DIR = "logs"
 
 HREF_RE = re.compile(
     r'href=["\'](.*?)["\']', re.IGNORECASE
@@ -108,7 +109,7 @@ class MyCrawler():
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content, encoding="utf-8")
 
-        mapping_fp = Path(SAVE_DIR) / "url_mapping.tsv"
+        mapping_fp = Path(LOGS_DIR) / "url_mapping.tsv"
         write_header = not mapping_fp.exists()
         with mapping_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
