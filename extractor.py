@@ -37,16 +37,15 @@ patterns: Dict[str, Optional[re.Pattern]] = {
         FLAGS
     ),
     "network_country": re.compile(
-        r'Network\(s\):\s*<a[^>]*>(?P<network>[^<]+)</a>\s*'
-        r'\(\s*<a[^>]*>(?P<country>[^<]+)</a>\s*\)\s*<br',
+        r'Network\(s\):\s*'
+        r'<a[^>]*>(?P<network>[^<]+)</a>\s*'
+        r'\(\s*<a[^>]*>(?P<country>[^<]+)</a>\s*\)'
+        r'(?:\s*/\s*.*?)?'
+        r'<br\s*/?>',
         FLAGS
     ),
     "runtime": re.compile(
         r'Run\s*time:\s*(?P<runtime>\d+)\s*min',
-        FLAGS
-    ),
-    "episode_count": re.compile(
-        r'Episodes:\s*(?P<episodes>[^<]+?)\s*<br',
         FLAGS
     ),
     "genres": re.compile(
@@ -59,7 +58,7 @@ patterns: Dict[str, Optional[re.Pattern]] = {
     ),
     "cast_row": re.compile(
         r'<li(?:(?!class="lihd").)*?>\s*'
-        r'(?:<a[^>]*>)?(?P<name>[^<]+?)(?:</a>)?\s*'
+        r'(?:<a[^>]*href="(?P<link>[^"]+)"[^>]*>)?(?P<name>[^<]+?)(?:</a>)?\s*'
         r'\s+as\s+'
         r'(?P<role>[^<\[]+?)'
         r'(?:\s*\[[^\]]*\])?'     
@@ -81,7 +80,7 @@ patterns: Dict[str, Optional[re.Pattern]] = {
         r"<td\s+class='epinfo\s+right'>\s*(?P<overall>\d+)\.\s*</td>\s*"
         r"<td\s+class='epinfo\s+left\s+pad'>\s*(?P<season_ep>\d+\s*-\s*\d+)\s*(?:&nbsp;)?\s*</td>\s*"
         r"<td\s+class='epinfo\s+right\s+pad'>\s*(?P<airdate>[^<]+?)\s*</td>\s*"
-        r"<td\s+class='eptitle\s+left'>\s*(?:<a[^>]*>)?(?P<title>[^<]+)</a?>\s*</td>\s*"
+        r"<td\s+class='eptitle\s+left'>\s*(?:<a[^>]*>)?(?P<title>[^<]+)</a?>.*?</td>\s*"
         r"</tr>",
         FLAGS
     ),
@@ -104,6 +103,11 @@ patterns: Dict[str, Optional[re.Pattern]] = {
 }
 
 @dataclass
+class ActorInfo:
+    name: str
+    imdb_link: Optional[str] = None
+
+@dataclass
 class ShowInfo:
     keywords: Optional[str] = None
     title: Optional[str] = None
@@ -117,7 +121,7 @@ class ShowInfo:
     runtime_minutes: Optional[int] = None
     episode_count: Optional[int] = None
     genres: Optional[List[str]] = field(default_factory=list)
-    cast: Optional[Dict[str, List[str]]] = field(default_factory=dict)
+    cast: Optional[Dict[ActorInfo, List[str]]] = field(default_factory=dict)
     description: Optional[str] = None
     season_count: Optional[int] = None
 
@@ -229,15 +233,6 @@ class Extractor:
         if rt and re.search(r"\d+", rt):
             show.runtime_minutes = int(re.search(r"\d+", rt).group(0))
 
-        # Episode count (raw + try to parse leading int)
-        ec_m = patterns.get("episode_count")
-        
-        em = ec_m.search(text)
-        ec = g(em, "episodes")
-        if ec:
-            m = re.search(r"\d+", ec)
-            show.episode_count = int(m.group(0)) if m else None
-
         # Genres (comma-separated)
         gn_m = patterns.get("genres")
         
@@ -259,7 +254,7 @@ class Extractor:
             show.description = d or None
 
         # Cast (grouped by name -> role list)
-        cast: dict[str, list[str]] = {}
+        cast: dict[ActorInfo, list[str]] = {}
         cb_pat = patterns.get("cast_block")
         cr_pat = patterns.get("cast_row")
         
@@ -267,17 +262,18 @@ class Extractor:
         block = g(cbm, "block")
         if block:
             for m in cr_pat.finditer(block):
+                link = g(m, "link")
                 name = g(m, "name")
                 role = g(m, "role") or "cast"
                 if not name:
                     continue
-                key = name.strip().lower()
-                if key not in cast:
-                    cast[key] = []
+                actor_info = ActorInfo(name=name.strip(), imdb_link=link)
+                if actor_info not in cast:
+                    cast[actor_info] = []
                 roles = [part.strip() for part in role.split(';') if part.strip()]
                 for r in roles:
-                    if r not in cast[key]:
-                        cast[key].append(r)
+                    if r not in cast[actor_info]:
+                        cast[actor_info].append(r)
 
         show.cast = cast
 
@@ -285,6 +281,7 @@ class Extractor:
         seasons: dict[int, SeasonInfo] = {}
         specials: Optional[SeasonInfo] = None
         seasons_count = 0
+        episodes_count = 0
 
         ep_scope = text
         eb_pat = patterns.get("episode_block")
@@ -343,6 +340,7 @@ class Extractor:
                 airdate=air_raw,
                 airdate_iso=air_iso
             )
+            episodes_count += 1
 
             # Route into seasons / specials
             if season_no == 0:
@@ -431,11 +429,11 @@ class Extractor:
         with actors_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
             if write_header_actors:
-                writer.writerow(["actor_name"])
-            for actor, _ in data.show.cast.items():
-                if actor not in self.unique_actors:
-                    writer.writerow([actor])
-                    self.unique_actors.add(actor)
+                writer.writerow(["actor_name", "imdb_link"])
+            for actor_info, _ in data.show.cast.items():
+                if actor_info not in self.unique_actors:
+                    writer.writerow([actor_info.name, actor_info.imdb_link])
+                    self.unique_actors.add(actor_info)
             
         credits_fp = Path(LOGS_DIR) / "extracted_credits.tsv"
         write_header_credits = not credits_fp.exists()
@@ -445,7 +443,7 @@ class Extractor:
                 writer.writerow(["show_url", "actor_name", "role"])
             for actor, roles in data.show.cast.items():
                 for role in roles:
-                    writer.writerow([data.url, actor, role])
+                    writer.writerow([data.url, actor.name, role])
 
         seasons_fp = Path(LOGS_DIR) / "extracted_seasons.tsv"
         write_header_seasons = not seasons_fp.exists()
@@ -525,6 +523,11 @@ class Extractor:
             month = self._month_str_to_int(month_str)
             if month:
                 return f"{year:04d}-{month:02d}-01"
+        # Try year only
+        m = re.match(r"(\d{4})", date_str)
+        if m:
+            year = int(m.group(1))
+            return f"{year:04d}-01-01"
             
         return None
     

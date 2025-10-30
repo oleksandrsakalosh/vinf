@@ -22,7 +22,7 @@ def tokenize(text: str) -> list[str]:
 @dataclass
 class Doc:
     doc_id: int
-    doc_type: str      # "show" | "episode" | "actor"
+    doc_type: str      # "show" | "episode"
     url: str
     title: str
     extra: dict
@@ -45,12 +45,6 @@ class Indexer:
         return (1.0 + math.log(tf)) if (self.tf_sublinear and tf > 0) else float(tf)
 
     def build(self, iterable: Iterable[Tuple[str, str, str, Dict[str, str]]], field_weights: Dict[str, Dict[str, float]]):
-        """
-        iterable yields: (doc_type, title, url, fields_dict)
-          - doc_type: "show" | "episode" | "actor"
-          - fields_dict: name -> text
-        field_weights: {"show": {...}, "episode": {...}, "actor": {...}}
-        """
         per_doc_counts: list[Counter] = []
 
         for doc_type, title, url, fields in iterable:
@@ -76,7 +70,6 @@ class Indexer:
         if self.N == 0:
             return
 
-        # postings + df
         for doc in self.docs:
             counts = per_doc_counts[doc.doc_id]
             for term, tf in counts.items():
