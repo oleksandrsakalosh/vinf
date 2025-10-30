@@ -14,19 +14,14 @@ BASE_DELAY = 2.0
 TIMEOUT = 20
 
 logger = CrawlerLogger()
-SAVE_DIR = "data" # .gitignore this directory
-LOGS_DIR = "logs"
+SAVE_DIR = "data"
+EXTRACTED_DIR = "extracted"
 
 HREF_RE = re.compile(
     r'href=["\'](.*?)["\']', re.IGNORECASE
 )
 
 SKIP_SCHEMES = ('mailto:', 'javascript:', 'tel:', 'data:')
-
-mode = "controlled" # "prod" | "dev" | "controlled"
-LINKS = [
-    "https://epguides.com/Simpsons/",
-]
 
 def load_robots(base_url):
     rp = urob.RobotFileParser()
@@ -109,7 +104,7 @@ class MyCrawler():
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content, encoding="utf-8")
 
-        mapping_fp = Path(LOGS_DIR) / "url_mapping.tsv"
+        mapping_fp = Path(EXTRACTED_DIR) / "url_mapping.tsv"
         write_header = not mapping_fp.exists()
         with mapping_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
@@ -118,101 +113,41 @@ class MyCrawler():
             writer.writerow([url, str(fp)])
 
     def run(self):
-        if mode == "prod":
-            while self.to_visit:
-                start = time.time()
-                url = self.to_visit.popleft()
-                logger.log_info(f"Fetching: {url}")
-                if url in self.visited:
-                    logger.log_skip(url, "Already visited")
-                    continue
+        while self.to_visit:
+            start = time.time()
+            url = self.to_visit.popleft()
+            logger.log_info(f"Fetching: {url}")
+            if url in self.visited:
+                logger.log_skip(url, "Already visited")
+                continue
 
-                html = self.fetch(url)
-                if html:
-                    self.save_html(html, url)
-                    links = self.extract_links(html)
-                    count = 0
-                    for link in links:
-                        new_url = self.normalize_url(link)
-                        if not new_url: 
-                            logger.log_skip(link, "Failed to normalize URL")
-                            continue
-                        if not new_url.startswith(self.base_url):
-                            logger.log_skip(new_url, "Cross-origin link")
-                            continue
-                        if not self.allowed(new_url):
-                            logger.log_skip(new_url, "Disallowed by robots.txt")
-                            continue
-                        if new_url in self.visited:
-                            logger.log_skip(new_url, "Already visited")
-                            continue
-
-                        self.to_visit.append(new_url)
-                        count += 1
-                    response_time = time.time() - start
-                    logger.log_page_crawled(url, count, response_time=response_time)
-                else:
-                    logger.log_skip(url, "No HTML content")
-                self.visited.add(url)
-        elif mode == "dev":
-            max_depth = 2
-            current_depth = 0
-
-            while self.to_visit and current_depth < max_depth:
-                logger.log_info(f"Current depth: {current_depth}")
-                logger.log_info(f"URLs to visit: {len(self.to_visit)}")
-                start = time.time()
-                next_level = deque()
-                for url in list(self.to_visit):
-                    logger.log_info(f"Fetching: {url}")
-                    if url in self.visited:
-                        logger.log_skip(url, "Already visited")
+            html = self.fetch(url)
+            if html:
+                self.save_html(html, url)
+                links = self.extract_links(html)
+                count = 0
+                for link in links:
+                    new_url = self.normalize_url(link)
+                    if not new_url: 
+                        logger.log_skip(link, "Failed to normalize URL")
+                        continue
+                    if not new_url.startswith(self.base_url):
+                        logger.log_skip(new_url, "Cross-origin link")
+                        continue
+                    if not self.allowed(new_url):
+                        logger.log_skip(new_url, "Disallowed by robots.txt")
+                        continue
+                    if new_url in self.visited:
+                        logger.log_skip(new_url, "Already visited")
                         continue
 
-                    html = self.fetch(url)
-                    if html:
-                        self.save_html(html, url)
-                        links = self.extract_links(html)
-                        count = 0
-                        for link in links:
-                            new_url = self.normalize_url(link)
-                            if not new_url: 
-                                logger.log_skip(link, "Failed to normalize URL")
-                                continue
-                            if not new_url.startswith(self.base_url):
-                                logger.log_skip(new_url, "Cross-origin link")
-                                continue
-                            if not self.allowed(new_url):
-                                logger.log_skip(new_url, "Disallowed by robots.txt")
-                                continue
-                            if new_url in self.visited:
-                                logger.log_skip(new_url, "Already visited")
-                                continue
-                            next_level.append(new_url)
-                            count += 1
-                        response_time = time.time() - start
-                        logger.log_page_crawled(url, count, response_time)
-                    else:
-                        logger.log_skip(url, "No HTML content")
-                    self.visited.add(url)
-                self.to_visit = next_level
-                current_depth += 1
-        elif mode == "controlled":
-            for url in LINKS:
-                start = time.time()
-                logger.log_info(f"Fetching: {url}")
-                if url in self.visited:
-                    logger.log_skip(url, "Already visited")
-                    continue
-
-                html = self.fetch(url)
-                if html:
-                    self.save_html(html, url)
-                    response_time = time.time() - start
-                    logger.log_page_crawled(url, 0, response_time)
-                else:
-                    logger.log_skip(url, "No HTML content")
-                self.visited.add(url)
+                    self.to_visit.append(new_url)
+                    count += 1
+                response_time = time.time() - start
+                logger.log_page_crawled(url, count, response_time=response_time)
+            else:
+                logger.log_skip(url, "No HTML content")
+            self.visited.add(url)
 
 if __name__ == "__main__":
     crawler = MyCrawler()

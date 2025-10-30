@@ -9,13 +9,13 @@ import html
 from logger import ExtractorLogger
 
 logger = ExtractorLogger()
-LOGS_DIR = "logs"
+EXTRACTED_DIR = "extracted"
 
 FLAGS = re.DOTALL | re.IGNORECASE
 
 patterns: Dict[str, Optional[re.Pattern]] = {
     # Metadata
-    "keywords": re.compile( # <meta name="keywords" content="Comedy, Game/Quiz, television, series, show, episode guide">
+    "keywords": re.compile( 
         r'<meta\s+name="keywords"\s+content="(?P<keywords>[^"]+)"\s*/?>',
         FLAGS
     ),
@@ -38,14 +38,14 @@ patterns: Dict[str, Optional[re.Pattern]] = {
     ),
     "network_country": re.compile(
         r'Network\(s\):\s*'
-        r'<a[^>]*>(?P<network>[^<]+)</a>\s*'
+        r'(?:<a[^>]*>(?P<network>[^<]*)</a>\s*)?'  
         r'\(\s*<a[^>]*>(?P<country>[^<]+)</a>\s*\)'
-        r'(?:\s*/\s*.*?)?'
+        r'(?:\s*/\s*.*?)?'                    
         r'<br\s*/?>',
         FLAGS
     ),
     "runtime": re.compile(
-        r'Run\s*time:\s*(?P<runtime>\d+)\s*min',
+        r'Run\s*time:\s*(?P<runtime>[^<]+?)\s*<br\s*/?>',
         FLAGS
     ),
     "genres": re.compile(
@@ -57,12 +57,15 @@ patterns: Dict[str, Optional[re.Pattern]] = {
         FLAGS
     ),
     "cast_row": re.compile(
-        r'<li(?:(?!class="lihd").)*?>\s*'
-        r'(?:<a[^>]*>)?(?P<name>[^<]+?)(?:</a>)?\s*'
-        r'(?:\s+as\s+(?P<role>[^<\[]+?)'        # optional "as Role"
-        r'(?:\s*\[[^\]]*\])?'                   # optional [note]
-        r')?'                                   # ← whole role part is optional
-        r'\s*</li>',
+       r"<li(?![^>]*class=['\"]lihd['\"]).*?>\s*"
+        r"(?:<a[^>]*href=\"(?P<url>[^\"]+)\"[^>]*>\s*)?"
+        r"(?:<strong>\s*)?"
+        r"(?P<name>[^<]+?)"
+        r"(?:\s*</strong>)?"
+        r"(?:\s*</a>)?"
+        r"\s*(?:as\s+(?P<role>[^<\[]+?))?"
+        r"(?:\s*\[[^\]]*\])?"
+        r"\s*</li>",
         FLAGS
     ),
     "description": re.compile(
@@ -72,17 +75,32 @@ patterns: Dict[str, Optional[re.Pattern]] = {
 
     # Episodes
     "episode_block": re.compile(
-        r'<div\s+id="eplist"[^>]*>\s*(?P<eplist>.*?</table>)\s*</div>',
+        r'<div\s+id="eplist"[^>]*>\s*(?P<eplist>.*?(?:</table>|</pre>))\s*</div>',
         FLAGS
     ),
     "episode_row": re.compile(
+        r"(?:"
+        # --- New layout ---
         r"<tr>\s*"
         r"<td\s+class='epinfo\s+right'>\s*(?P<overall>\d+)\.\s*</td>\s*"
         r"<td\s+class='epinfo\s+left\s+pad'>\s*(?P<season_ep>\d+\s*-\s*\d+)\s*(?:&nbsp;)?\s*</td>\s*"
         r"<td\s+class='epinfo\s+right\s+pad'>\s*(?P<airdate>[^<]+?)\s*</td>\s*"
-        r"<td\s+class='eptitle\s+left'>\s*(?:<a[^>]*>)?(?P<title>[^<]+)</a?>.*?</td>\s*"
-        r"</tr>",
-        FLAGS
+        r"<td\s+class='eptitle\s+left'>\s*"
+            r"(?:<a[^>]*href=\"(?P<link>[^\"]+)\"[^>]*>)?"
+            r"(?P<title>[^<]+)"
+            r"</a?>.*?"
+        r"</td>\s*"
+        r"</tr>"
+        r"|"
+        # --- Old format ---
+        r"^\s*(?P<overall_pre>\d+)\.\s+"
+        r"(?P<season_ep_pre>\d+\s*-\s*\d+)\s+"
+        r"(?P<airdate_pre>\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})\s+"
+        r"<a[^>]*href=\"(?P<link_pre>[^\"]+)\"[^>]*>"
+            r"(?P<title_pre>[^<]+)"
+        r"</a>"
+        r")",
+        re.DOTALL | re.IGNORECASE | re.MULTILINE,
     ),
     "overall_episode_number": re.compile(
         r'^\s*(?P<overall>\d+)\.\s*$',
@@ -105,7 +123,8 @@ patterns: Dict[str, Optional[re.Pattern]] = {
 @dataclass
 class ActorInfo:
     name: str
-    imdb_link: Optional[str] = None
+    actor_url: Optional[str] = None
+    roles: Optional[List[str]] = field(default_factory=list)
 
 @dataclass
 class ShowInfo:
@@ -121,7 +140,7 @@ class ShowInfo:
     runtime_minutes: Optional[int] = None
     episode_count: Optional[int] = None
     genres: Optional[List[str]] = field(default_factory=list)
-    cast: Optional[Dict[ActorInfo, List[str]]] = field(default_factory=dict)
+    cast: Optional[List[ActorInfo]] = field(default_factory=list)
     description: Optional[str] = None
     season_count: Optional[int] = None
 
@@ -131,6 +150,7 @@ class EpisodeInfo:
     title: Optional[str] = None
     airdate: Optional[str] = None
     airdate_iso: Optional[str] = None
+    url: Optional[str] = None
 
 @dataclass
 class SeasonInfo:
@@ -171,7 +191,7 @@ class Extractor:
                     self._mark_extracted(url, path, "no_data")
                     logger.log_warning(f"No data extracted for URL: {url}")
             except Exception as e:
-                self._mark_extracted(url, path, "error")
+                self._mark_extracted(url, path, "error: " + str(e))
                 logger.log_error(url, e)
 
     def extract_one(self, url: str, text: str) -> Optional[ShowExtract]:
@@ -225,13 +245,29 @@ class Extractor:
         show.network = g(nm, "network")
         show.country = g(nm, "country")
 
+        if show.network == "":
+            show.network = None
+
         # Runtime (minutes)
         rt_m = patterns.get("runtime")
         
         rm = rt_m.search(text)
         rt = g(rm, "runtime")
-        if rt and re.search(r"\d+", rt):
-            show.runtime_minutes = int(re.search(r"\d+", rt).group(0))
+        if rt:
+            rt = rt.replace("min", "").strip()
+
+            m_range = re.match(r'^(\d+)\s*/\s*(\d+)$', rt)
+            if m_range:
+                show.runtime_minutes = f"{m_range.group(1)}-{m_range.group(2)}"
+            else:
+                m_range2 = re.match(r'^(\d+)\s*-\s*(\d+)$', rt)
+                if m_range2:
+                    show.runtime_minutes = f"{m_range2.group(1)}-{m_range2.group(2)}"
+                else:
+                    m_single = re.search(r'\d+', rt)
+                    if m_single:
+                        show.runtime_minutes = int(m_single.group(0))
+
 
         # Genres (comma-separated)
         gn_m = patterns.get("genres")
@@ -254,7 +290,7 @@ class Extractor:
             show.description = d or None
 
         # Cast (grouped by name -> role list)
-        cast: dict[ActorInfo, list[str]] = {}
+        cast: list[ActorInfo] = []
         cb_pat = patterns.get("cast_block")
         cr_pat = patterns.get("cast_row")
         
@@ -262,18 +298,15 @@ class Extractor:
         block = g(cbm, "block")
         if block:
             for m in cr_pat.finditer(block):
-                link = g(m, "link")
+                url = g(m, "url")
                 name = g(m, "name")
                 role = g(m, "role") or "cast"
                 if not name:
                     continue
-                actor_info = ActorInfo(name=name.strip(), imdb_link=link)
-                if actor_info not in cast:
-                    cast[actor_info] = []
+                actor_info = ActorInfo(name=name.strip(), actor_url=url)
+                cast.append(actor_info)
                 roles = [part.strip() for part in role.split(';') if part.strip()]
-                for r in roles:
-                    if r not in cast[actor_info]:
-                        cast[actor_info].append(r)
+                actor_info.roles.extend(roles)
 
         show.cast = cast
 
@@ -297,13 +330,12 @@ class Extractor:
         ttl_pat = patterns.get("episode_title")
 
         for row in row_pat.finditer(ep_scope):
-            # Raw captures from row
-            overall_raw = g(row, "overall")
-            season_ep_raw = g(row, "season_ep")
-            air_raw = g(row, "airdate")
-            title_raw = g(row, "title")
+            overall_raw = g(row, "overall") or g(row, "overall_pre")
+            season_ep_raw = g(row, "season_ep") or g(row, "season_ep_pre")
+            air_raw = g(row, "airdate") or g(row, "airdate_pre")
+            title_raw = g(row, "title") or g(row, "title_pre")
+            ep_link = g(row, "link") or g(row, "link_pre")
 
-            # Per-field refinement (optional patterns)
             if overall_raw:
                 mm = over_pat.search(overall_raw)
                 overall_raw = g(mm, "overall", overall_raw)
@@ -316,43 +348,44 @@ class Extractor:
                     e = g(mm, "ep")
                     season_no = int(s) if s and s.isdigit() else None
                     ep_no = int(e) if e and e.isdigit() else None
-            # Fallback parse "1-10"
+                    
             if season_no is None and season_ep_raw:
                 se_m = re.search(r"(\d+)\s*-\s*(\d+)", season_ep_raw)
                 if se_m:
                     season_no = int(se_m.group(1))
                     ep_no = int(se_m.group(2))
 
-            # Airdate refine + normalize
             if air_raw:
                 mm = air_pat.search(air_raw)
                 air_raw = g(mm, "airdate", air_raw)
-            air_iso = air_raw if air_raw else None
+            air_iso = self._date_to_iso(air_raw) if air_raw else None
 
             if title_raw:
                 mm = ttl_pat.search(title_raw)
                 title_raw = g(mm, "title", title_raw)
 
-            # Build episode info
+            if ep_link:
+                ep_link = ep_link.strip()
+
             epi = EpisodeInfo(
                 season=season_no,
                 title=title_raw,
                 airdate=air_raw,
-                airdate_iso=air_iso
+                airdate_iso=air_iso,
+                url=ep_link
             )
             episodes_count += 1
 
-            # Route into seasons / specials
             if season_no == 0:
                 if specials is None:
                     specials = SeasonInfo()
-                # If episode number unknown, place at len+1; else keyed by ep number
+                    
                 key = ep_no if ep_no is not None else (len(specials.episodes) + 1)
                 specials.episodes[key] = epi
             else:
                 if season_no is None:
-                    # If truly unknown season, consider treating as season 1 fallback
                     season_no = 1
+
                 if season_no not in seasons:
                     seasons[season_no] = SeasonInfo()
                     seasons_count += 1
@@ -360,6 +393,7 @@ class Extractor:
                 seasons[season_no].episodes[key] = epi
 
         show.season_count = seasons_count
+        show.episode_count = episodes_count
 
         return ShowExtract(
             url=url,
@@ -367,16 +401,9 @@ class Extractor:
             seasons=seasons,
             specials=specials
         )
-
-    
-    def _extract_title(self, html: str) -> Optional[str]:
-        match = patterns["title"].search(html)
-        if match:
-            return match.group(1).strip()
-        return None
     
     def _read_tsv(self) -> Iterable[Dict[str, str]]:
-        path = Path(LOGS_DIR) / "url_mapping.tsv"
+        path = Path(EXTRACTED_DIR) / "url_mapping.tsv"
         if not path.exists():
             logger.log_warning(f"URL mapping file not found: {path}")
             return []
@@ -386,7 +413,7 @@ class Extractor:
                 yield row
 
     def _mark_extracted(self, url: str, path: str, status: str):
-        extracted_fp = Path(LOGS_DIR) / "extracted_mapping.tsv"
+        extracted_fp = Path(EXTRACTED_DIR) / "extracted_mapping.tsv"
         write_header = not extracted_fp.exists()
         with extracted_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
@@ -395,7 +422,7 @@ class Extractor:
             writer.writerow([url, path, status])
 
     def _save_extracted_data(self, data: ShowExtract):
-        shows_fp = Path(LOGS_DIR) / "extracted_shows.tsv"
+        shows_fp = Path(EXTRACTED_DIR) / "extracted_shows.tsv"
         write_header = not shows_fp.exists()
         with shows_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
@@ -424,28 +451,28 @@ class Extractor:
                 data.show.season_count
             ])
             
-        actors_fp = Path(LOGS_DIR) / "extracted_actors.tsv"
+        actors_fp = Path(EXTRACTED_DIR) / "extracted_actors.tsv"
         write_header_actors = not actors_fp.exists()
         with actors_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
             if write_header_actors:
-                writer.writerow(["actor_name", "imdb_link"])
-            for actor_info, _ in data.show.cast.items():
-                if actor_info not in self.unique_actors:
-                    writer.writerow([actor_info.name, actor_info.imdb_link])
-                    self.unique_actors.add(actor_info)
-            
-        credits_fp = Path(LOGS_DIR) / "extracted_credits.tsv"
+                writer.writerow(["actor_name", "actor_url"])
+            for actor_info in data.show.cast:
+                if actor_info.name not in self.unique_actors:
+                    writer.writerow([actor_info.name, actor_info.actor_url])
+                    self.unique_actors.add(actor_info.name)
+
+        credits_fp = Path(EXTRACTED_DIR) / "extracted_credits.tsv"
         write_header_credits = not credits_fp.exists()
         with credits_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
             if write_header_credits:
                 writer.writerow(["show_url", "actor_name", "role"])
-            for actor, roles in data.show.cast.items():
-                for role in roles:
-                    writer.writerow([data.url, actor.name, role])
+            for actor_info in data.show.cast:
+                for role in actor_info.roles:
+                    writer.writerow([data.url, actor_info.name, role])
 
-        seasons_fp = Path(LOGS_DIR) / "extracted_seasons.tsv"
+        seasons_fp = Path(EXTRACTED_DIR) / "extracted_seasons.tsv"
         write_header_seasons = not seasons_fp.exists()
         with seasons_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
@@ -454,7 +481,7 @@ class Extractor:
             for season_num, season_info in data.seasons.items():
                 writer.writerow([data.url, season_num, len(season_info.episodes)])
 
-        episodes_fp = Path(LOGS_DIR) / "extracted_episodes.tsv"
+        episodes_fp = Path(EXTRACTED_DIR) / "extracted_episodes.tsv"
         write_header_episodes = not episodes_fp.exists()
         with episodes_fp.open("a", encoding="utf-8", newline='') as f:
             writer = csv.writer(f, delimiter="\t")
@@ -462,7 +489,7 @@ class Extractor:
                 writer.writerow([
                     "show_url", "season_number", "episode_number_in_season",
                     "episode_number_overall", "episode_title", "airdate",
-                    "airdate_iso"
+                    "airdate_iso", "episode_url"
                 ])
             number_overall = 1
             for season_num, season_info in data.seasons.items():
@@ -474,7 +501,8 @@ class Extractor:
                         number_overall,
                         episode_info.title,
                         episode_info.airdate,
-                        episode_info.airdate_iso
+                        episode_info.airdate_iso,
+                        episode_info.url
                     ])
                     number_overall += 1
             if data.specials:
@@ -486,18 +514,15 @@ class Extractor:
                         number_overall,
                         episode_info.title,
                         episode_info.airdate,
-                        episode_info.airdate_iso
+                        episode_info.airdate_iso,
+                        episode_info.url
                     ])
                     number_overall += 1
 
     def _date_to_iso(self, date_str: str) -> Optional[str]:
-        '''
-        Convert date string like "12 Jan 20" or "Jan 20" to ISO format "2020-01-12".
-        Returns None if input is invalid or cannot be parsed.
-        '''
         if not date_str:
             return None
-        date_str = date_str.replace('?', '').strip()
+        date_str = date_str.replace('?', '').replace('_', '').strip()
         # Try full date first
         m = re.match(r"(\d{1,2})\s+([A-Za-z]{3,4})\s+(\d{2,4})", date_str)
         if m:
@@ -534,9 +559,9 @@ class Extractor:
     def _month_str_to_int(self, month_str: str) -> Optional[int]:
         month_str = month_str.lower()
         months = {
-            "jan": 1, "feb": 2, "mar": 3, "apr": 4, 
-            "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7, "aug": 8, 
-            "sep": 9, "oct": 10, "nov": 11, "dec": 12
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "april": 4,
+            "may": 5, "mat": 5, "jun": 6, "june": 6, "jul": 7, "july": 7, "aug": 8, 
+            "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
         }
         return months.get(month_str, None)
     
@@ -547,7 +572,7 @@ class Extractor:
         '''
         shows = set()
 
-        shows_fp = Path(LOGS_DIR) / "extracted_shows.tsv"
+        shows_fp = Path(EXTRACTED_DIR) / "extracted_shows.tsv"
         if not shows_fp.exists():
             logger.log_warning(f"Extracted shows file not found: {shows_fp}")
             return
@@ -578,8 +603,8 @@ class Extractor:
                     logger.log_warning(f"Missing or invalid start date for URL: {url}")
                 if (not date_end or not date_end_iso) and status and status.lower() in {"ended", "canceled", "cancelled/ended"}:
                     logger.log_warning(f"Missing or invalid end date for URL: {url}")
-                if not runtime.isdigit():
-                    logger.log_warning(f"Invalid runtime for URL: {url}")
+                if not runtime:
+                    logger.log_warning(f"Missing runtime for URL: {url}")
                 if not status:
                     logger.log_warning(f"Missing status for URL: {url}")
                 if status and status.lower() not in {"current show", "ended", "on hiatus", "canceled", "cancelled/ended"}:
@@ -599,7 +624,7 @@ class Extractor:
                 if not season_count.isdigit():
                     logger.log_warning(f"Invalid season count for URL: {url}")
 
-        seasons_fp = Path(LOGS_DIR) / "extracted_seasons.tsv"
+        seasons_fp = Path(EXTRACTED_DIR) / "extracted_seasons.tsv"
         season_shows = set()
         if not seasons_fp.exists():
             logger.log_warning(f"Extracted seasons file not found: {seasons_fp}")
@@ -619,7 +644,7 @@ class Extractor:
                 if not episode_count.isdigit():
                     logger.log_warning(f"Invalid episode count for URL: {url}")
 
-        fp_episodes = Path(LOGS_DIR) / "extracted_episodes.tsv"
+        fp_episodes = Path(EXTRACTED_DIR) / "extracted_episodes.tsv"
         episode_shows = set()
         if not fp_episodes.exists():
             logger.log_warning(f"Extracted episodes file not found: {fp_episodes}")
@@ -635,6 +660,7 @@ class Extractor:
                 episode_title = row.get("episode_title", "")
                 airdate = row.get("airdate", "")
                 airdate_iso = row.get("airdate_iso", "")
+                episode_url = row.get("episode_url", "")
 
                 if url not in shows:
                     logger.log_warning(f"Show URL in shows.tsv not found in episodes.tsv: {url}")
@@ -648,8 +674,10 @@ class Extractor:
                     logger.log_warning(f"Missing episode title for URL: {url}")
                 if not airdate or not airdate_iso:
                     logger.log_warning(f"Missing or invalid airdate for URL: {url}")
+                if not episode_url:
+                    logger.log_warning(f"Missing episode URL for URL: {url}")
 
-        fp_credits = Path(LOGS_DIR) / "extracted_credits.tsv"
+        fp_credits = Path(EXTRACTED_DIR) / "extracted_credits.tsv"
         credits_shows = set()
         if not fp_credits.exists():
             logger.log_warning(f"Extracted credits file not found: {fp_credits}")

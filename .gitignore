@@ -185,6 +185,8 @@ Lib/
 Scripts/
 pyvenv.cfg
 
-# Fetched pages
+# Data folders
 data/
 logs/
+extracted/
+indexer/
