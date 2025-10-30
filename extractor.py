@@ -58,10 +58,10 @@ patterns: Dict[str, Optional[re.Pattern]] = {
     ),
     "cast_row": re.compile(
         r'<li(?:(?!class="lihd").)*?>\s*'
-        r'(?:<a[^>]*href="(?P<link>[^"]+)"[^>]*>)?(?P<name>[^<]+?)(?:</a>)?\s*'
-        r'\s+as\s+'
-        r'(?P<role>[^<\[]+?)'
-        r'(?:\s*\[[^\]]*\])?'     
+        r'(?:<a[^>]*>)?(?P<name>[^<]+?)(?:</a>)?\s*'
+        r'(?:\s+as\s+(?P<role>[^<\[]+?)'        # optional "as Role"
+        r'(?:\s*\[[^\]]*\])?'                   # optional [note]
+        r')?'                                   # ← whole role part is optional
         r'\s*</li>',
         FLAGS
     ),
@@ -497,7 +497,7 @@ class Extractor:
         '''
         if not date_str:
             return None
-        date_str = date_str.strip()
+        date_str = date_str.replace('?', '').strip()
         # Try full date first
         m = re.match(r"(\d{1,2})\s+([A-Za-z]{3,4})\s+(\d{2,4})", date_str)
         if m:
