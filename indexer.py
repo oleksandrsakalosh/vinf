@@ -32,7 +32,7 @@ class Doc:
 class Indexer:
     def __init__(self, 
                  tf_sublinear=True, 
-                 idf_mode: str = "smooth",   # "classic" | "smooth" | "prob"
+                 idf_mode: str = "smooth",   # "classic" | "smooth" | "prob" | "invdf"
                  ):
         self.tf_sublinear = tf_sublinear
         self.idf_mode = idf_mode
@@ -97,6 +97,11 @@ class Indexer:
                     self.idf[t] = 0.0
                 else:
                     self.idf[t] = math.log(num / den)
+
+        elif self.idf_mode == "invdf":
+            # idf_inv(t) = 1 / (1 + df(t))
+            for t, df in self.df.items():
+                self.idf[t] = 1.0 / (1.0 + df)
 
         else:  # "smooth" default
             # smoothed idf = ln((1 + N)/(1 + df)) + 1
@@ -333,7 +338,7 @@ if __name__ == "__main__":
         },
     }
 
-    idx = Indexer(tf_sublinear=True, idf_mode="prob")
+    idx = Indexer(tf_sublinear=True, idf_mode="invdf")
     idx.run(weights)
     print(f"Indexed {idx.N} documents, saved to {OUT}")
 

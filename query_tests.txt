@@ -1,0 +1,118 @@
+IDF=classic
+query: chemistry teacher with terminal cancer
+1) 0.439  EPISODE:  Breaking Bad — S1E4: Cancer Man
+2) 0.428  ACTOR:  Ana Alexander
+3) 0.393  ACTOR:  Stephanie Koenig
+4) 0.370  SHOW:  Breaking Bad
+5) 0.365  ACTOR:  Asante Jones
+query: type:show fantasy dragons
+1) 0.392  SHOW:  Dragons: Rescue Riders
+2) 0.369  SHOW:  Dungeons & Dragons
+3) 0.322  SHOW:  Dragons: Race to the Edge
+4) 0.322  SHOW:  Dragons: The Nine Realms
+5) 0.259  SHOW:  DreamWorks Dragons
+query: type:episode simpsons Halloween
+1) 0.419  EPISODE:  The Simpsons — S27E4: Halloween of Horror
+2) 0.416  EPISODE:  20/20 — S2024E31: Her Last Halloween
+3) 0.404  EPISODE:  Today's Special — S1E14: Halloween
+4) 0.391  EPISODE:  Our Little Family — S1E2: A Hamill Halloween
+5) 0.390  EPISODE:  The Real World — S11E23: Halloween Madness
+query: type:actor aaron paul breaking bad
+1) 0.503  ACTOR:  RJ Mitte
+2) 0.428  ACTOR:  Paul Richards
+3) 0.391  ACTOR:  Aaron Paul
+4) 0.359  ACTOR:  Betsy Brandt
+5) 0.334  ACTOR:  Gretchen Bonaduce
+IDF=smooth
+query: chemistry teacher with terminal cancer
+1) 0.429  EPISODE:  Breaking Bad — S1E4: Cancer Man
+2) 0.410  ACTOR:  Ana Alexander
+3) 0.392  ACTOR:  Stephanie Koenig
+4) 0.365  SHOW:  Breaking Bad
+5) 0.355  ACTOR:  Asante Jones
+query: type:show fantasy dragons
+1) 0.385  SHOW:  Dragons: Rescue Riders
+2) 0.366  SHOW:  Dungeons & Dragons
+3) 0.317  SHOW:  Dragons: Race to the Edge
+4) 0.316  SHOW:  Dragons: The Nine Realms
+5) 0.258  SHOW:  DreamWorks Dragons
+query: type:episode simpsons Halloween
+1) 0.405  EPISODE:  The Simpsons — S27E4: Halloween of Horror
+2) 0.396  EPISODE:  20/20 — S2024E31: Her Last Halloween
+3) 0.385  EPISODE:  Today's Special — S1E14: Halloween
+4) 0.375  EPISODE:  The Real World — S11E23: Halloween Madness
+5) 0.370  EPISODE:  Our Little Family — S1E2: A Hamill Halloween
+query: type:actor aaron paul breaking bad
+1) 0.505  ACTOR:  RJ Mitte
+2) 0.428  ACTOR:  Paul Richards
+3) 0.402  ACTOR:  Aaron Paul
+4) 0.347  ACTOR:  Betsy Brandt
+5) 0.327  ACTOR:  Gretchen Bonaduce
+IDF=prob
+query: chemistry teacher with terminal cancer
+1) 0.439  EPISODE:  Breaking Bad — S1E4: Cancer Man
+2) 0.429  ACTOR:  Ana Alexander
+3) 0.396  ACTOR:  Stephanie Koenig
+4) 0.371  SHOW:  Breaking Bad
+5) 0.365  ACTOR:  Asante Jones
+query: type:show fantasy dragons
+1) 0.393 SHOW:  Dragons: Rescue Riders
+2) 0.369  SHOW:  Dungeons & Dragons
+3) 0.323  SHOW:  Dragons: Race to the Edge
+4) 0.322  SHOW:  Dragons: The Nine Realms
+5) 0.259  SHOW:  DreamWorks Dragons
+query: type:episode simpsons Halloween
+1) 0.420  EPISODE:  The Simpsons — S27E4: Halloween of Horror
+2) 0.419  EPISODE:  20/20 — S2024E31: Her Last Halloween
+3) 0.406  EPISODE:  Today's Special — S1E14: Halloween
+4) 0.392  EPISODE:  Our Little Family — S1E2: A Hamill Halloween
+5) 0.390  EPISODE:  The Real World — S11E23: Halloween Madness
+query: type:actor aaron paul breaking bad
+1) 0.504 ACTOR:  RJ Mitte
+2) 0.427  ACTOR:  Paul Richards
+3) 0.391  ACTOR:  Aaron Paul
+4) 0.361  ACTOR:  Betsy Brandt
+5) 0.335  ACTOR:  Gretchen Bonaduce
+IDF=invdf
+query: chemistry teacher with terminal cancer
+1) 0.779  ACTOR:  Ana Alexander
+2) 0.764  EPISODE:  The New Detectives — S1E3: Deadly Chemistry
+3) 0.748  EPISODE:  The Wrong Coast — S1E3: Chemistry
+4) 0.731  EPISODE:  The Nature of Things — S3E7: Chemistry of Salt
+5) 0.726  EPISODE:  James May's Things You Need to Know — S2E6: ...about Chemistry
+query: type:show fantasy dragons
+1) 0.147  SHOW:  Dragons: The Nine Realms
+2) 0.133  SHOW:  Critical Role
+3) 0.113  SHOW:  Dragons: Rescue Riders
+4) 0.104  SHOW:  Dragons: Race to the Edge
+5) 0.057  SHOW:  Dungeons & Dragons
+query: type:episode simpsons Halloween
+1) 0.780  EPISODE:  The New Lassie — S1E6: Halloween
+2) 0.727  EPISODE:  All or Nothing — S3E4: Happy Halloween
+3) 0.715  EPISODE:  Our Little Family — S1E2: A Hamill Halloween
+4) 0.693  EPISODE:  Today's Special — S1E14: Halloween
+5) 0.670  EPISODE:  Ultimate Spider-Man — S4E20: Strange Little Halloween
+query: type:actor aaron paul breaking bad
+1) 0.433  ACTOR:  Paul Richards
+2) 0.358  ACTOR:  Shaun Cassidy
+3) 0.304  ACTOR:  Erin Richards
+4) 0.176  ACTOR:  Jay Brown
+5) 0.162  ACTOR:  Gretchen Bonaduce
+query: type:actor dan castellaneta
+1) 0.013  ACTOR:  Rick Moses
+2) 0.012  ACTOR:  Dan Payne
+3) 0.012  ACTOR:  Jeff Bridges
+4) 0.008  ACTOR:  Dan O'Donahue
+5) 0.007  ACTOR:  Dan Wells
+query: simpsons
+1) 1.030  SHOW:  Simpsons Specials
+2) 0.917  EPISODE:  Dennis Miller Live — S2E25: The O.J. Simpsons Trial
+3) 0.772  EPISODE:  The Simpsons — S1E7: The Call of the Simpsons
+4) 0.768  EPISODE:  The Simpsons — S2E20: The War of the Simpsons
+5) 0.606  SHOW:  The Simpsons
+query: type:episode halloween
+1) 1.191  EPISODE:  The New Lassie — S1E6: Halloween
+2) 1.110  EPISODE:  All or Nothing — S3E4: Happy Halloween
+3) 1.092  EPISODE:  Our Little Family — S1E2: A Hamill Halloween
+4) 1.058  EPISODE:  Today's Special — S1E14: Halloween
+5) 1.023  EPISODE:  Ultimate Spider-Man — S4E20: Strange Little Halloween
