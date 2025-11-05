@@ -1,7 +1,9 @@
 from pathlib import Path
 from indexer import Indexer
 
-IDX = Path("indexer/index.json")
+from indexer import Doc
+
+IDX = Path("indexer")
 
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -25,12 +27,13 @@ def color(text, c):
     return f"{c}{text}{RESET}"
 
 if __name__ == "__main__":
-    idx = Indexer.load(IDX)
-    print(color(f"Loaded {idx.N} docs from {IDX}", FG_GREEN))
-    print(color("Tip:", FG_BLUE), "filter by type, e.g.",
-          color("type:show fantasy", FG_CYAN), ";",
-          color("type:actor cranston", FG_MAGENTA), ";",
-          color("type:episode fly", FG_YELLOW))
+    idf_mode = input(
+        "Select IDF mode (classic, smooth, prob, invdf) [classic]: "
+    ).strip()
+    if not idf_mode:
+        idf_mode = "classic"
+    idx = Indexer.load(IDX/f"index_{idf_mode}.json")
+    print(color(f"Loaded {idx.N} docs from {IDX/f'index_{idf_mode}.json'}", FG_GREEN))
 
     while True:
         try:
@@ -42,14 +45,14 @@ if __name__ == "__main__":
         if not q:
             break
 
-        hits = idx.search(q, top_k=10)
+        hits: list[tuple[float, Doc]] = idx.search(q, top_k=10)
 
         if not hits:
             print(color("No results.", FG_RED))
         else:
             print()
             for score, doc in hits[:10]:
-                t = getattr(doc, "doc_type", "") or ""
+                t = "show"
                 url = doc.url or "(no url)"
                 type_color = TYPE_COLORS.get(t, FG_WHITE)
                 print(
@@ -58,9 +61,13 @@ if __name__ == "__main__":
                     f"{color(BOLD + doc.title + RESET, type_color)}  "
                     f"{color('→', FG_WHITE)} {color(url, FG_WHITE)}"
                 )
-                for k, v in (doc.extra or {}).items():
-                    if not v:
-                        continue
-                    print(f"    {color(k + ':', FG_WHITE)} {color(str(v), DIM)}")
+                print(f"    {color(DIM + doc.description + RESET, FG_WHITE)}")
+                print(f"    {color('Keywords:', FG_WHITE)} {color(doc.keywords, DIM)}")
+                print(f"    {color('Genres:', FG_WHITE)} {color(doc.genres, DIM)}")
+                print(f"    {color('Cast:', FG_WHITE)} {color(doc.cast, DIM)}")
+                print(f"    {color('Characters:', FG_WHITE)} {color(doc.characters, DIM)}")
+                print(f"    {color('Episodes:', FG_WHITE)}")
+                for ep in doc.episodes.splitlines():
+                    print(f"      {color(ep, DIM)}")
 
         print()

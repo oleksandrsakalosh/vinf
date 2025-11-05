@@ -3,7 +3,7 @@ import csv, json, math, re
 from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple, Iterable
+from typing import Dict, List, Optional, Tuple, Iterable
 
 EXTRACTED_DIR = Path("./extracted")
 
@@ -13,7 +13,6 @@ CREDITS = EXTRACTED_DIR/"extracted_credits.tsv"
 ACTORS = EXTRACTED_DIR/"extracted_actors.tsv"
 
 INDEXER_DIR = Path("./indexer")
-OUT = INDEXER_DIR/"index.json"
 
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -24,10 +23,25 @@ def tokenize(text: str) -> list[str]:
 @dataclass
 class Doc:
     doc_id: int
-    doc_type: str      # "show" | "episode" | "actor"
     url: str
     title: str
-    extra: dict
+    keywords: Optional[str] = None
+    date_start: Optional[str] = None
+    date_start_iso: Optional[str] = None
+    date_end: Optional[str] = None
+    date_end_iso: Optional[str] = None
+    status: Optional[str] = None
+    network: Optional[str] = None
+    country: Optional[str] = None
+    runtime_minutes: Optional[int] = None
+    episode_count: Optional[int] = None
+    genres: Optional[str] = None
+    cast: Optional[str] = None
+    characters: Optional[str] = None
+    description: Optional[str] = None
+    season_count: Optional[int] = None
+    episodes: Optional[str] = None
+
 
 class Indexer:
     def __init__(self, 
@@ -68,7 +82,21 @@ class Indexer:
             if not counts:
                 continue
             doc_id = len(self.docs)
-            self.docs.append(Doc(doc_id=doc_id, doc_type=doc_type, url=url, title=title, extra=fields))
+            self.docs.append(Doc(
+                    doc_id=doc_id, 
+                    url=url, 
+                    title=title, 
+                    keywords=fields.get("keywords"), 
+                    status=fields.get("status"), 
+                    network=fields.get("network"), 
+                    country=fields.get("country"), 
+                    genres=fields.get("genres"), 
+                    cast=fields.get("cast"), 
+                    characters=fields.get("characters"), 
+                    description=fields.get("description"), 
+                    episodes=fields.get("episodes")
+                )
+            )
             per_doc_counts.append(counts)
 
         self.N = len(self.docs)
@@ -117,50 +145,45 @@ class Indexer:
                 s += w_td * w_td
             self.doc_norm[doc.doc_id] = math.sqrt(max(s, 1e-12))
 
-    def build_docs(self, shows, episodes, credits, actors):
-        shows_by_url = {s["url"]: s for s in shows}
+    def build_docs(self, shows, episodes, credits):
+        episodes_by_show: Dict[str, List[str]] = defaultdict(list)
 
-        actor_urls = {}
-        for a in actors:
-            name = (a.get("actor_name") or "").strip()
-            url  = (a.get("actor_url") or "").strip()
-            if name:
-                actor_urls[name] = url
+        for ep in episodes:
+            show_url = ep.get("show_url", "") or ""
+            title = ep.get("episode_title", "") or ""
+            airdate_iso = ep.get("airdate_iso", "") or ""
 
-        show_cast: dict[str, set[str]] = defaultdict(set)
+            episodes_by_show[show_url].append(f"{title} ({airdate_iso})")
 
-        actor_map: dict[str, dict] = defaultdict(lambda: {"url": "", "shows": defaultdict(lambda: {"title": "", "roles": set()})})
+        actors_by_show: Dict[str, List[str]] = defaultdict(list)
+        characters_by_show: Dict[str, List[str]] = defaultdict(list)
 
-        for c in credits:
-            show_url = (c.get("show_url") or "").strip()
-            actor_name = (c.get("actor_name") or "").strip()
-            role = (c.get("role") or "").strip()
-            if not show_url or not actor_name:
-                continue
+        for cr in credits:
+            show_url = cr.get("show_url", "") or ""
+            actor_name = cr.get("actor_name", "") or ""
+            character_name = cr.get("role", "") or ""
 
-            show_cast[show_url].add(actor_name)
-
-            show_title = shows_by_url.get(show_url, {}).get("title", "").strip()
-
-            actor_entry = actor_map[actor_name]
-            
-            if actor_name in actor_urls:
-                actor_entry["url"] = actor_urls[actor_name]
-
-            show_entry = actor_entry["shows"][show_url]
-            if show_title:
-                show_entry["title"] = show_title
-            if role:
-                show_entry["roles"].add(role)
+            if actor_name:
+                if actor_name not in actors_by_show[show_url]:
+                    actors_by_show[show_url].append(actor_name)
+            if character_name:
+                if character_name not in characters_by_show[show_url]:
+                    characters_by_show[show_url].append(character_name)
 
         # SHOW docs
         for s in shows:
             show_url = s.get("url", "") or ""
             title = s.get("title", "") or show_url
             genres = (s.get("genres") or "").replace("|", " ")
-            
-            cast_list = sorted(show_cast.get(show_url, []))
+
+            episode_list = episodes_by_show.get(show_url, [])
+            episode_str = "\n".join(episode_list)
+
+            cast_list = sorted(actors_by_show.get(show_url, []))
             cast_str = ", ".join(cast_list)
+
+            character_list = sorted(characters_by_show.get(show_url, []))
+            character_str = ", ".join(character_list)
 
             fields = {
                 "show_title": s.get("title", "") or "",
@@ -170,72 +193,16 @@ class Indexer:
                 "status": s.get("status", "") or "",
                 "network": s.get("network", "") or "",
                 "country": s.get("country", "") or "",
+                "episodes": episode_str,
+                "characters": character_str,
+                "keywords": s.get("keywords", "") or "",
             }
             yield ("show", title, show_url, fields)
-
-        # EPISODE docs
-        for e in episodes:
-            show_url = e.get("show_url", "") or ""
-            s = shows_by_url.get(show_url, {})
-            show_title = s.get("title", "") or ""
-            ep_title = e.get("episode_title", "") or ""
-            season = e.get("season_number", "") or ""
-            epno = e.get("episode_number_in_season", "") or ""
-            title = f"{show_title} — S{season}E{epno}: {ep_title}".strip(" -—:")
-            ep_url = e.get("episode_url", "") or ""
-
-            genres = (s.get("genres") or "").replace("|", " ")
-            cast_list = sorted(show_cast.get(show_url, []))
-            cast_str = ", ".join(cast_list)
-
-            fields = {
-                "episode_title": ep_title,
-                "show_title": show_title,
-                "genres": genres,
-                "cast": cast_str,
-                "description": s.get("description", "") or "",
-                "status": s.get("status", "") or "",
-                "network": s.get("network", "") or "",
-                "country": s.get("country", "") or "",
-                "meta": f"S{season}E{epno} {e.get('airdate_iso','')}".strip(),
-            }
-            yield ("episode", title, ep_url, fields)
-
-        # ACTOR docs
-        for actor_name, ainfo in actor_map.items():
-            actor_url = ainfo.get("url", "") or ""
-            shows_blob = []
-            roles_blob = []
-
-            for s_url, sinfo in ainfo["shows"].items():
-                stitle = sinfo.get("title", "") or s_url
-                shows_blob.append(stitle)
-
-                for role in sorted(sinfo["roles"]):
-                    roles_blob.append(f"{stitle}: {role}")
-
-            fields = {
-                "actor_name": actor_name,
-                "shows": ", ".join(shows_blob),
-                "roles": ", ".join(roles_blob),
-            }
-            yield ("actor", actor_name, actor_url, fields)
-
-
-    def _parse_query(self, query: str):
-        # simple filter: type:show|episode|actor
-        q = query.strip()
-        doc_type = None
-        m = re.search(r"\btype:(show|episode|actor)\b", q, re.I)
-        if m:
-            doc_type = m.group(1).lower()
-            q = (q[:m.start()] + q[m.end():]).strip()
-        return doc_type, tokenize(q)
 
     def search(self, query: str, top_k: int = 20) -> list[tuple[float, Doc]]:
         if not query or self.N == 0:
             return []
-        type_filter, q_tokens = self._parse_query(query)
+        q_tokens = tokenize(query.strip())
         if not q_tokens:
             return []
 
@@ -253,8 +220,6 @@ class Indexer:
                 continue
             idfw = self.idf.get(t, 0.0)
             for doc_id, tf in posts:
-                if type_filter and self.docs[doc_id].doc_type != type_filter:
-                    continue
                 w_td = self._tfw(tf) * idfw
                 scores[doc_id] += w_td * wq
 
@@ -302,11 +267,10 @@ class Indexer:
         shows = self.load_tsv(SHOWS)
         episodes = self.load_tsv(EPISODES)
         credits = self.load_tsv(CREDITS)
-        actors = self.load_tsv(ACTORS)
 
-        all_docs = self.build_docs(shows, episodes, credits, actors)
+        all_docs = self.build_docs(shows, episodes, credits)
         self.build(all_docs, weights)
-        self.save(OUT)
+        self.save(INDEXER_DIR/f"index_{self.idf_mode}.json")
 
 
 if __name__ == "__main__":
@@ -319,26 +283,28 @@ if __name__ == "__main__":
             "status": 0.5,
             "network": 0.5,
             "country": 0.5,
-        },
-        "episode": {
-            "episode_title": 2.0,
-            "show_title": 1.6,
-            "genres": 1.2,
-            "cast": 1.0,
-            "description": 0.8,
-            "status": 0.4,
-            "network": 0.4,
-            "country": 0.4,
-            "meta": 0.6,
-        },
-        "actor": {
-            "actor_name": 2.3,
-            "shows": 1.5,
-            "roles": 1.1,
+            "episodes": 1.0,
+            "characters": 1.0,
+            "keywords": 1.0,
         },
     }
 
-    idx = Indexer(tf_sublinear=True, idf_mode="invdf")
+    print("Building classic index...")
+    idx = Indexer(tf_sublinear=True, idf_mode="classic")
     idx.run(weights)
-    print(f"Indexed {idx.N} documents, saved to {OUT}")
+    print(f"Indexed {idx.N} documents with classic indexing, saved to {INDEXER_DIR/f"index_{idx.idf_mode}.json"}")
 
+    print("Building smooth index...")
+    idx2 = Indexer(tf_sublinear=True, idf_mode="smooth")
+    idx2.run(weights)
+    print(f"Indexed {idx2.N} documents with smooth indexing, saved to {INDEXER_DIR/f"index_{idx2.idf_mode}.json"}")
+
+    print("Building probabilistic index...")
+    idx3 = Indexer(tf_sublinear=True, idf_mode="prob")
+    idx3.run(weights)
+    print(f"Indexed {idx3.N} documents with probabilistic indexing, saved to {INDEXER_DIR/f"index_{idx3.idf_mode}.json"}")
+
+    print("Building inverse document frequency index...")
+    idx4 = Indexer(tf_sublinear=True, idf_mode="invdf")
+    idx4.run(weights)
+    print(f"Indexed {idx4.N} documents with inverse document frequency indexing, saved to {INDEXER_DIR/f"index_{idx4.idf_mode}.json"}")
