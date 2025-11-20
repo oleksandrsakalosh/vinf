@@ -108,3 +108,30 @@ class ExtractorLogger:
             'url': url,
             'error': str(error)
         }))
+
+class WikiLogger:
+    def __init__(self, log_file='wiki_extractor.log'):
+        self.logger = logging.getLogger('WikiLogger')
+        self.logger.setLevel(logging.INFO)
+
+        handler = logging.FileHandler(f"{LOGS_DIR}/{log_file}")
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        
+        with open(f"{LOGS_DIR}/{log_file}", 'w'):
+            pass
+    
+    def log(self, message):
+        self.logger.info(json.dumps({
+            'event': 'info',
+            'message': message
+        }))
+
+    def log_error(self, error):
+        self.logger.error(json.dumps({
+            'event': 'error',
+            'error': str(error)
+        }))
