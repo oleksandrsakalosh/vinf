@@ -51,13 +51,9 @@ def run(searcher: IndexSearcher, analyzer: StandardAnalyzer):
             network = doc.get("network") or ""
             url = doc.get("url") or ""
 
-            print(f"{i:2d}. {title} ({start_year})  [score={score_doc.score:.3f}]")
-            if country or network:
-                print(f"    Country: {country}   Network: {network}")
+            print(f"{i:2d}. {title}  [score={score_doc.score:.3f}]")
             if genres:
                 print(f"    Genres: {genres}")
-            if url:
-                print(f"    URL: {url}")
             print("-" * 60)
 
 
