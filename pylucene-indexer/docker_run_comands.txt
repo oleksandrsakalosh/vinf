@@ -1,0 +1,16 @@
+docker run --rm `
+  -v C:\Users\orelo\repos\vinf\extracted:/data `
+  -v C:\Users\orelo\repos\vinf\pylucene-indexer:/app `
+  -v C:\Users\orelo\repos\vinf\pylucene-indexer\indexes:/index `
+  -e DATA_DIR=/data `
+  -e INDEX_DIR=/index `
+  coady/pylucene:10.0.0 `
+  python /app/pylucene-indexer.py
+
+docker run --rm `
+  -v C:\Users\orelo\repos\vinf\pylucene-indexer:/app `
+  -v C:\Users\orelo\repos\vinf\pylucene-indexer\indexes:/index `
+  -e INDEX_DIR=/index `
+  -it `
+  coady/pylucene:10.0.0 `
+  python /app/pylucene_search.py

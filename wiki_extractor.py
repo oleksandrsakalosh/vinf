@@ -23,7 +23,7 @@ WIKI_DUMP = f"{DATA_DIR}/enwiki-latest-pages-articles-multistream18.xml-p2371619
 from logger import WikiLogger
 logger = WikiLogger()
 
-def create_spark(app_name="ShowSearchIndexer") -> SparkSession:
+def create_spark(app_name="ShowSearch") -> SparkSession:
     spark = (SparkSession.builder.appName(app_name)
         .master("local[12]") 
         .config("spark.sql.adaptive.enabled", "true")
@@ -35,7 +35,7 @@ def create_spark(app_name="ShowSearchIndexer") -> SparkSession:
     return spark
     
 
-class SparkWikiExtractorIndexer:
+class SparkWikiExtractor:
 
     def __init__(self):
         self.spark: SparkSession = create_spark()
@@ -170,7 +170,7 @@ class SparkWikiExtractorIndexer:
 
         return show_docs
 
-    def parse_wiki_dump(self, show_whitelist: F.DataFrame, include_episodes: bool = True, include_actors: bool = True) -> F.DataFrame:
+    def parse_wiki_dump(self, show_whitelist: F.DataFrame) -> F.DataFrame:
         logger.log("Parsing Wikipedia dump and extracting relevant pages...")
 
         shows_nt = F.broadcast(show_whitelist)
@@ -214,14 +214,6 @@ class SparkWikiExtractorIndexer:
 
         selected = wiki_cleaned.select("page_id", "title", "clean_text")
 
-        if include_episodes:
-            # TODO
-            pass
-        
-        if include_actors:
-            # TODO
-            pass
-
         return selected  # columns: page_id, title, clean_text
     
     def build_corpus(self):
@@ -255,106 +247,6 @@ class SparkWikiExtractorIndexer:
         
         logger.log(f"Combined corpus built. Total documents: {self.corpus.count()}")
 
-    def compute_tfidf(self):
-        logger.log("Computing TF-IDF vectors for the corpus...")
-
-        # Expect self.corpus: [doc_id (long), url (string), title (string), text (string)]
-        df = self.corpus.select("doc_id", "url", "title", "text")
-
-        # 1) Tokenize with Spark (no Python UDF here)
-        tok = RegexTokenizer(inputCol="text", outputCol="tokens", pattern=r"[^a-zA-Z0-9]+", toLowercase=True, minTokenLength=2)
-        df_tok = tok.transform(df)
-
-        # 2) Remove stopwords (English; you can merge a custom list)
-        sw = StopWordsRemover(inputCol="tokens", outputCol="tokens_sw")
-        df_sw = sw.transform(df_tok)
-
-        # Optional: drop rare numeric-only garbage
-        df_sw = df_sw.withColumn("tokens_sw", F.expr("filter(tokens_sw, x -> length(x) >= 2)"))
-
-        # 3) CountVectorizer -> TF
-        # minDF: if >=1 → absolute doc freq; if in (0,1) → fraction of docs.
-        # Good starting point: keep terms that appear in at least 2 docs, but no more than 40% of docs.
-        n_docs = df_sw.select(F.count("*").alias("n")).first()["n"]
-        min_df_abs = 2
-        max_df_frac = 0.4
-
-        cv = CountVectorizer(
-            inputCol="tokens_sw",
-            outputCol="tf_features",
-            vocabSize=50000,   # lower if RAM tight (e.g., 30_000)
-            minDF=float(min_df_abs),   # or minDF=0.001 for % if you prefer
-            maxDF=max_df_frac
-        )
-        cv_model = cv.fit(df_sw)
-        tf_df = cv_model.transform(df_sw)
-
-        # 4) IDF
-        idf = IDF(inputCol="tf_features", outputCol="tfidf_features")
-        idf_model = idf.fit(tf_df)
-        tfidf_df = idf_model.transform(tf_df).select("doc_id", "url", "title", "tfidf_features")
-
-        # (Optional) persist then unpersist if you chain more ops
-        # tfidf_df = tfidf_df.persist()
-
-        # 5) Save outputs
-        self.save_artifacts_locally(cv_model, idf_model, tfidf_df)
-
-        logger.log(f"TF-IDF vectors saved (docs={n_docs}, vocab={len(cv_model.vocabulary)})")
-        return tfidf_df
-
-    def save_artifacts_locally(self, cv_model: CountVectorizerModel, idf_model: IDFModel, tfidf_df: DataFrame):
-        out = Path(SPARK_DIR)
-        _ensure_dir(out)
-
-        # 1) vocab.txt  (overwrite safely)
-        vocab = cv_model.vocabulary
-        vocab_path = out / "vocab.txt"
-        vocab_path.write_text("\n".join(vocab), encoding="utf-8")
-
-        # 2) idf.json   (store just the vector; reload is trivial)
-        idf_path = out / "idf.json"
-        idf_path.write_text(
-            json.dumps({"idf": idf_model.idf.toArray().tolist()}),
-            encoding="utf-8"
-        )
-
-        # 3) docs.tsv (doc_id, url, title) — handy for lookup when searching
-        docs_tsv = out / "docs.tsv"
-        with docs_tsv.open("w", encoding="utf-8", newline="") as f:
-            w = csv.writer(f, delimiter="\t")
-            w.writerow(["doc_id", "url", "title"])
-            for r in tfidf_df.select("doc_id", "url", "title").toLocalIterator():
-                w.writerow([int(r.doc_id), r.url or "", r.title or ""])
-
-
-        # 4) tfidf_rows.pkl.gz — stream each SparseVector to driver and pickle
-        #    Format: tuple(doc_id:int, indices:list[int], values:list[float])
-        rows_path = out / "tfidf_rows.pkl.gz"
-        with gzip.open(rows_path, "wb") as f:
-            for r in tfidf_df.select("doc_id", "url", "title", "tfidf_features").toLocalIterator():
-                sv = r.tfidf_features
-                pickle.dump(
-                    (int(r.doc_id), r.url or "", r.title or "", list(sv.indices), list(sv.values)),
-                    f,
-                    protocol=pickle.HIGHEST_PROTOCOL
-                )
-
-        # 5) manifest.json
-        manifest_path = out / "manifest.json"
-        manifest_path.write_text(
-            json.dumps({
-                "docs": int(self.corpus.count()),
-                "vocab": len(vocab),
-                "storage": {
-                    "vocab_txt": str(vocab_path),
-                    "idf_json": str(idf_path),
-                    "tfidf_rows": str(rows_path),
-                },
-            }, indent=2),
-            encoding="utf-8"
-        )
-    
     def close(self):
         self.spark.stop()
 
@@ -371,7 +263,6 @@ def norm_title(col: str | None) -> str:
     return F.trim(c)
 
 if __name__ == "__main__":
-    extractor_indexer = SparkWikiExtractorIndexer()
-    extractor_indexer.build_corpus()
-    extractor_indexer.compute_tfidf()
-    extractor_indexer.close()
+    extractor = SparkWikiExtractor()
+    extractor.build_corpus()
+    extractor.close()

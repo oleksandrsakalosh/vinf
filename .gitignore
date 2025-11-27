@@ -191,3 +191,5 @@ logs/
 extracted/
 indexer/
 spark/
+enwiki-dumps/
+pylucene-indexer/indexes/
